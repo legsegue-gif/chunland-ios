@@ -1,0 +1,16 @@
+// Config.xcconfig.example —— 复制为 Config.xcconfig 并填入你自己的值即可编译：
+//   cp Config.xcconfig.example Config.xcconfig
+// 你的 Config.xcconfig 已被 .gitignore，不会提交（请勿提交你的真实值）。
+
+// 你的 App 唯一标识（反向域名）。
+PRODUCT_BUNDLE_IDENTIFIER = com.example.chunland
+
+// 你的 Apple 开发者 Team ID（留空可用 Xcode 自动签名）。
+DEVELOPMENT_TEAM =
+
+// 支付宝商户 App ID —— 无支付需求可留此占位（回调 scheme = alipay$(ALIPAY_APP_ID)）。
+ALIPAY_APP_ID = 2021000000000000
+
+// 你的后端 API 主机名（不含 https:// 与 /api/v1）。Release 构建连此主机。
+// 本仓库只含 iOS 客户端，不含后端 —— 你需自备一个兼容的服务端。
+PROD_API_HOST = your-server.example.com

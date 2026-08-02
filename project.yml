@@ -1,0 +1,78 @@
+name: Chunland
+options:
+  bundleIdPrefix: com.chunland
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+  xcodeVersion: "16"
+
+packages:
+  ChunlandCore:
+    path: ChunlandCore
+
+targets:
+  Chunland:
+    type: application
+    platform: iOS
+    sources:
+      - path: Chunland/Sources
+    resources:
+      - path: Chunland/Sources/Resources
+    dependencies:
+      - package: ChunlandCore
+    # 身份/签名/后端配置在 Config.xcconfig（本地文件，不入库）——
+    # 提供 PRODUCT_BUNDLE_IDENTIFIER / DEVELOPMENT_TEAM / ALIPAY_APP_ID / PROD_API_HOST。
+    configFiles:
+      Debug: Config.xcconfig
+      Release: Config.xcconfig
+    # 推送 capability（xcodegen generate 时生成 entitlements 文件）。
+    # development 对应 Xcode 直装包（APNs sandbox）；App Store 分发签名时自动改写为 production
+    entitlements:
+      path: Chunland/Chunland.entitlements
+      properties:
+        aps-environment: development
+    settings:
+      base:
+        # 版本号单一真相源：在此改，xcodegen generate 后生效（Info.plist 用 $(MARKETING_VERSION)/$(CURRENT_PROJECT_VERSION) 引用）。
+        # CFBundleShortVersionString（对外版本，App Store 展示）/ CFBundleVersion（构建号，每次上传须递增）。
+        MARKETING_VERSION: "2.1.0"
+        CURRENT_PROJECT_VERSION: "4"
+        SWIFT_VERSION: "6.0"
+        INFOPLIST_FILE: Chunland/Sources/Resources/Info.plist
+        # Info.plist 按构建配置区分 ATS（Debug 全放行连 dev / Release 严格 HTTPS）：
+        # 预处理 Info.plist 跑 #if DEBUG。-traditional-cpp 必须有 —— 否则 C 预处理器会把
+        # DOCTYPE 行里的 `//`（-//Apple//DTD、http://…）当行注释吞掉、毁掉 plist。
+        INFOPLIST_PREPROCESS: YES
+        INFOPLIST_OTHER_PREPROCESSOR_FLAGS: "-traditional-cpp"
+      configs:
+        Debug:
+          INFOPLIST_PREPROCESSOR_DEFINITIONS: DEBUG=1
+
+  ChunlandTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Chunland/Tests
+    dependencies:
+      - target: Chunland
+
+# 显式声明共享 scheme（CI 环境 clone 后需要它才能编译）。
+# XcodeGen 把这里声明的 scheme 写入 Chunland.xcodeproj/xcshareddata/xcschemes/。
+schemes:
+  Chunland:
+    build:
+      targets:
+        Chunland: all
+        ChunlandTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ChunlandTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

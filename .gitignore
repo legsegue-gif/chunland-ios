@@ -1,0 +1,8 @@
+# 你的真实配置（bundle id / team / 后端主机）—— 从 .example 复制一份填自己的值。
+Config.xcconfig
+
+# 构建产物
+DerivedData/
+build/
+*.xcuserstate
+.DS_Store

@@ -1,0 +1,54 @@
+name: CI
+
+# 构建门 + 密钥兜底：每个 PR 验证工程能编过 + gitleaks 扫一遍。
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # app 用了 iOS 26 API（tabBarMinimizeBehavior 等）—— 需带 iOS 26 SDK 的 Xcode。
+      # runner 默认 Xcode 可能偏旧，显式选最新 stable。
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Prepare Config.xcconfig (占位值即可，simulator 构建不需签名)
+        run: cp Config.xcconfig.example Config.xcconfig
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build (iOS Simulator, no signing)
+        run: |
+          xcodebuild \
+            -project Chunland.xcodeproj \
+            -scheme Chunland \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # 用 gitleaks CLI 直接扫（不用 gitleaks-action —— 后者对私有 repo 要付费 license + token）。
+      - name: Install gitleaks
+        run: |
+          VERSION=8.30.1
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" | tar -xz gitleaks
+          sudo install gitleaks /usr/local/bin/gitleaks
+      - name: Scan
+        run: gitleaks detect --source . --no-git --redact --no-banner

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundleDisplayName</key>
+    <string>金鳞</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleVersion</key>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(MARKETING_VERSION)</string>
+    <!-- prod 后端主机, 由 Config.xcconfig (PROD_API_HOST) 注入; AppSettings 运行时读取 -->
+    <key>ProdAPIHost</key>
+    <string>$(PROD_API_HOST)</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+#if DEBUG
+        <!-- Debug: allow arbitrary cleartext so dev can reach a local dev server over
+             localhost / LAN [NOT covered by NSAllowsLocalNetworking]. -->
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+#else
+        <!-- Release [App Store]: strict, HTTPS only. -->
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+#endif
+    </dict>
+    <!-- Uses only standard HTTPS encryption; exempt from export compliance. -->
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
+    <key>UILaunchScreen</key>
+    <dict/>
+    <!-- iPad 不支持多任务则必须声明 UIRequiresFullScreen, 否则 App Store 交付校验要求支持全部 4 个方向. 锁竖屏 -->
+    <key>UIRequiresFullScreen</key>
+    <true/>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+    </array>
+    <!-- 支付宝 App ID, 由 Config.xcconfig (ALIPAY_APP_ID) 注入; OrderDetailStore 运行时读取拼回跳 scheme -->
+    <key>AlipayAppID</key>
+    <string>$(ALIPAY_APP_ID)</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>alipay</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>alipay$(ALIPAY_APP_ID)</string>
+            </array>
+        </dict>
+    </array>
+    <key>LSApplicationQueriesSchemes</key>
+    <array>
+        <string>alipay</string>
+        <string>alipays</string>
+    </array>
+    <key>NSCameraUsageDescription</key>
+    <string>用于与买家/代购人视频通话及拍照发送给 AI 助手识别商品</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>用于自动填写收货地址所在的省市区</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>用于与买家/代购人进行语音通话</string>
+    <!-- keep audio alive when backgrounded/locked during a TRTC call -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>audio</string>
+    </array>
+</dict>
+</plist>

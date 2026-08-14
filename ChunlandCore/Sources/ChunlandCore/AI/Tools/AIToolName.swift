@@ -72,23 +72,6 @@ public enum AIToolName: String, CaseIterable, Sendable {
         allowedIdentities.contains(identity)
     }
 
-    /// 实时类工具 —— 结果随时间失效（购物车/订单/接单/店铺快照）。发送期把历史轮的
-    /// 这类结果折叠成过期占位（AIOrchestrator.wireHistory），物理杜绝模型复用过期数据；
-    /// 搜索/详情/分类结果刻意不折叠（prompt 规则 3 明确允许复用），mutation 的简短
-    /// 确认文本（含订单号）保留作对话叙事。Android 同构（AiToolName.resultVolatile）。
-    public var resultIsVolatile: Bool {
-        switch self {
-        case .getCart, .listMyOrders, .getOrderDetail,
-             .listMyClaims, .buildPurchaseList, .summarizeSettlements,
-             .listStoreProducts, .listCategorySchemes:
-            return true
-        case .searchProducts, .getProductDetail, .getCategories,
-             .addToCart, .placeOrder, .proposeAdjustment,
-             .createCategoryScheme, .assignCategoryProducts:
-            return false
-        }
-    }
-
     /// 身份的中文标签（执行守卫的拒绝文案 / UI 共用）。
     public static func identityLabel(_ identity: String) -> String {
         switch identity {

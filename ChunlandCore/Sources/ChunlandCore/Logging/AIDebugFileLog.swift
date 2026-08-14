@@ -48,35 +48,47 @@ public enum AIDebugFileLog {
         }
     }
 
-    /// 发起请求前记录：model/provider/stream/工具列表 + 完整 messages（按实际发送的 wire 格式序列化）。
-    static func request(provider: String, model: String, stream: Bool, toolNames: [String], messages: [ChatMessage]) {
-        let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy = .convertToSnakeCase
-        let messagesJSON: Any
-        if let data = try? encoder.encode(messages),
-           let obj = try? JSONSerialization.jsonObject(with: data) {
-            messagesJSON = obj
-        } else {
-            messagesJSON = "<encode failed>"
-        }
+    /// 发起请求前记录：model / 工具列表 / 完整历史（按 domain 形状序列化）。
+    static func request(model: String, toolNames: [String], messages: [AgentMessage]) {
         emit("INFO ", "ai.request", [
-            "provider": provider, "model": model, "stream": stream,
-            "tools": toolNames, "messages": messagesJSON,
+            "model": model,
+            "tools": toolNames,
+            "messages": messages.map(describe),
         ])
     }
 
-    /// 一轮 agent loop 迭代结束时记录：finished / toolCalls / interrupted / error 及组装出的完整内容。
-    static func response(outcome: String, message: ChatMessage?, detail: String? = nil) {
+    /// 一轮结束时记录：结束原因 + 本轮产出。
+    static func response(outcome: String, text: String?, toolNames: [String] = [], detail: String? = nil) {
         var extra: [String: Any] = ["outcome": outcome]
-        if let message {
-            if let c = message.content { extra["content"] = c }
-            if let r = message.reasoning { extra["reasoning"] = r }
-            if let calls = message.toolCalls, !calls.isEmpty {
-                extra["toolCalls"] = calls.map { ["name": $0.function.name, "arguments": $0.function.arguments] }
-            }
-        }
+        if let text, !text.isEmpty { extra["text"] = text }
+        if !toolNames.isEmpty { extra["toolCalls"] = toolNames }
         if let detail { extra["detail"] = detail }
         emit("INFO ", "ai.response", extra)
+    }
+
+    /// domain 消息 → 可读结构。不落图片字节，只记引用（日志不该变成图床）。
+    private static func describe(_ message: AgentMessage) -> [String: Any] {
+        var parts: [[String: Any]] = []
+        for part in message.parts {
+            switch part {
+            case .text(let t):
+                parts.append(["kind": "text", "text": t])
+            case .toolUse(let id, let name, let input):
+                parts.append(["kind": "tool_use", "id": id, "name": name,
+                              "input": input.jsonString()])
+            case .toolResult(let id, let name, let text, let isError, _, let offloadRef):
+                var entry: [String: Any] = ["kind": "tool_result", "id": id,
+                                            "name": name, "isError": isError, "text": text]
+                if let offloadRef { entry["offloadRef"] = offloadRef }
+                parts.append(entry)
+            case .image(let ref):
+                parts.append(["kind": "image", "sha256": ref.sha256, "bytes": ref.bytes])
+            }
+        }
+        var out: [String: Any] = ["role": message.role.rawValue, "parts": parts]
+        if message.isInterrupted { out["interrupted"] = true }
+        if let reasoning = message.reasoning { out["reasoning"] = reasoning }
+        return out
     }
 
     /// 清空日志内容（截断为 0 字节，文件本身保留）。「开发者」页清空按钮用。

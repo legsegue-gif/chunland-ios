@@ -3,7 +3,6 @@ import ChunlandCore
 
 struct ProfileView: View {
     @EnvironmentObject var auth: AuthManager
-    @EnvironmentObject var orchestrator: AIOrchestrator
     @State private var profile: UserProfile?
     @State private var showReport = false
     @State private var isLoading = true
@@ -20,8 +19,9 @@ struct ProfileView: View {
     @State private var streamAnomalyContent = ""  // P4 留证：系统 AI 代理层流异常记录（PhaseAuditor 命中才有）
     // 同上一坑：body 里 UserDefaults.standard 直读也不是追踪依赖，AISetupSheet / ServerConfigSheet
     // 保存后本页不刷新 —— 用 @AppStorage 声明成追踪属性，sheet 内写 UserDefaults 即触发重算
-    @AppStorage("ai_use_system") private var aiUseSystem = false
-    @AppStorage("ai_model") private var aiModel = ""
+    /// AI 来源摘要。异步取自来源配置（库 + 安全存储），不是 UserDefaults ——
+    /// 重写后配置不再落 UserDefaults，读旧 key 会永远显示一个冻结的旧值。
+    @State private var aiSummary = ""
     #if DEBUG
     @AppStorage("serverBaseURL") private var serverURLDisplay = AppSettings.shared.defaultServerURL
     // 与系统 AI 代理模块 ProxyAnomalyLog 的文件名约定一致（刻意不 import 模块，路径即契约）
@@ -77,7 +77,7 @@ struct ProfileView: View {
                         HStack {
                             Label("配置 AI API", systemImage: "sparkles")
                             Spacer()
-                            Text(aiConfigSummary)
+                            Text(aiSummary)
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -220,9 +220,14 @@ struct ProfileView: View {
             }
             #endif
             .sheet(isPresented: $showAISetup) {
-                AISetupSheet()
-                    .environmentObject(orchestrator)
-                    .environmentObject(auth)
+                NavigationStack {
+                    AIProviderSettingsView(config: AIRuntime.shared.config)
+                }
+            }
+            // 关掉配置页回来要刷新 —— 用户很可能刚改过来源
+            .task(id: showAISetup) {
+                guard !showAISetup else { return }
+                aiSummary = await AIRuntime.shared.preferredSourceLabel()
             }
             .sheet(isPresented: $showServerConfig) {
                 ServerConfigSheet()
@@ -234,7 +239,12 @@ struct ProfileView: View {
                 OpenStoreView()
                     .environmentObject(auth)
             }
-            .confirmationDialog("确认退出登录？", isPresented: $showLogoutConfirm, titleVisibility: .visible) {
+            // 用 alert 而非 confirmationDialog：后者在 iPad（regular）渲染成 popover，
+            // 锚点取「挂载它的视图」——挂在整个 List 上时气泡弹到列表顶部，而按钮在
+            // 最底部，隔了一整屏，用户看不到就以为「点了退不出去」（实测）。
+            // alert 两端都是居中模态，零锚点依赖；破坏性操作用居中确认也更难被忽略。
+            // 同类坑参见 ActivityShareView（ShareLink 挂 List 行在 iPad 弹出即收）。
+            .alert("确认退出登录？", isPresented: $showLogoutConfirm) {
                 Button("退出登录", role: .destructive) {
                     Task {
                         await PushRegistrar.unregisterBeforeLogout() // 先解绑推送（此刻还持有登录态）
@@ -336,16 +346,6 @@ struct ProfileView: View {
 
     // MARK: - AI Config
 
-    /// 配置入口的来源摘要：系统提供 / 自定义 · 模型名 / 未配置（不展示运行状态，状态感知收在配置页内）
-    private var aiConfigSummary: String {
-        if aiUseSystem, SystemAIProvider.isIntegrated {
-            return "系统提供"
-        }
-        if let key = auth.aiApiKey, !key.isEmpty {
-            return aiModel.isEmpty ? "自定义" : "自定义 · \(aiModel)"
-        }
-        return "未配置"
-    }
 
     // MARK: - Identity
 

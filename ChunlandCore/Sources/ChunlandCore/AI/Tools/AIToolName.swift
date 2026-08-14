@@ -1,9 +1,14 @@
 import Foundation
 
-// MARK: - Tool 名 / 分类（共享类型）
+// MARK: - 工具名与身份可用集
 //
-// 工具的「定义（schema）+ 执行（handler）」已按域拆到 Tools/ 下各文件自注册（见 AIToolRegistry）。
-// 本文件只留跨域共享的类型：工具名枚举、读/写分类、确认意图、OpenAI function schema 结构。
+// **这是三身份工具门控的单一真相源。**
+//
+// 两侧共用同一判定：
+//   下发侧  AgentToolRegistry.availableTools  裁剪发给模型的 schema
+//   执行侧  AgentToolRegistry.isAvailable     在管道 preflight 阶段再拦一次
+// 执行侧必须存在 —— 会话跨身份留存（切身份不清历史），模型可能从历史里
+// 复调旧身份的工具名，「模型看不到」不等于「调不到」。
 
 public enum AIToolName: String, CaseIterable, Sendable {
     case searchProducts   = "search_products"
@@ -43,8 +48,8 @@ public enum AIToolName: String, CaseIterable, Sendable {
     }
 
     /// 三身份可用集 —— AI 可用/可调用的工具是**当前活跃身份的函数**（单一真相源）。
-    /// 两侧共用同一判定：下发侧（AIToolRegistry.tools 裁剪发给模型的 schema）+
-    /// 执行侧（AIOrchestrator.executeTool 守卫）。执行侧必须再拦一道 ——
+    /// 两侧共用同一判定：下发侧（AgentToolRegistry.availableTools 裁剪发给模型的 schema）+
+    /// 执行侧（工具管道 preflight 守卫）。执行侧必须再拦一道 ——
     /// 会话跨身份留存（切身份不清历史），模型可能从历史里复调旧身份的工具名，
     /// 「模型看不到」不等于「调不到」。产品语义：
     /// 购物/下单只属买家身份，代购/商家身份不做买家的事；get_order_detail 是唯一跨域
@@ -115,60 +120,5 @@ public enum AIToolName: String, CaseIterable, Sendable {
         case .createCategoryScheme: return "创建分类方案"
         case .assignCategoryProducts: return "归类商品"
         }
-    }
-}
-
-// MutationIntent —— AI 想执行变更操作时先返回一个意图，由 UI 弹确认窗
-public struct MutationIntent: Identifiable, Sendable {
-    public let id = UUID()
-    public let toolName: AIToolName
-    public let summary: String                 // 给用户看的中文摘要
-    public let payload: [String: String]       // 给开发者 debug，纯 String 便于 Sendable
-
-    public init(toolName: AIToolName, summary: String, payload: [String: String]) {
-        self.toolName = toolName
-        self.summary = summary
-        self.payload = payload
-    }
-}
-
-// MARK: - OpenAI function schema 结构（发给 AI 的工具描述）
-
-public struct AITool: Encodable {
-    public let type = "function"
-    public let function: AIFunction
-    public init(function: AIFunction) { self.function = function }
-}
-
-public struct AIFunction: Encodable {
-    public let name: String
-    public let description: String
-    public let parameters: AIParameters
-    public init(name: String, description: String, parameters: AIParameters) {
-        self.name = name
-        self.description = description
-        self.parameters = parameters
-    }
-}
-
-public struct AIParameters: Encodable {
-    public let type = "object"
-    public let properties: [String: AIProperty]
-    public let required: [String]
-    public init(properties: [String: AIProperty], required: [String]) {
-        self.properties = properties
-        self.required = required
-    }
-}
-
-public struct AIProperty: Encodable {
-    public let type: String
-    public let description: String
-    public let `enum`: [String]?
-
-    public init(type: String, description: String, enum cases: [String]? = nil) {
-        self.type = type
-        self.description = description
-        self.enum = cases
     }
 }

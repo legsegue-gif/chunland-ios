@@ -35,8 +35,8 @@ targets:
       base:
         # 版本号单一真相源：在此改，xcodegen generate 后生效（Info.plist 用 $(MARKETING_VERSION)/$(CURRENT_PROJECT_VERSION) 引用）。
         # CFBundleShortVersionString（对外版本，App Store 展示）/ CFBundleVersion（构建号，每次上传须递增）。
-        MARKETING_VERSION: "2.1.0"
-        CURRENT_PROJECT_VERSION: "4"
+        MARKETING_VERSION: "2.1.2"
+        CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "6.0"
         INFOPLIST_FILE: Chunland/Sources/Resources/Info.plist
         # Info.plist 按构建配置区分 ATS（Debug 全放行连 dev / Release 严格 HTTPS）：

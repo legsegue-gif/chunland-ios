@@ -124,7 +124,13 @@ public extension AIContext {
         let label = storeName.map { "「\($0)」" } ?? "你的店铺"
         return AIContext(
             title: storeName ?? "店铺助手",
-            seedNote: "用户是商家，正在管理\(label)。帮其做商品分类：先 list_store_products 拿商品、list_category_schemes 看现有方案；建新方案用 create_category_scheme（会弹确认）；归类用 assign_category_products（每个分类调用一次、给该分类全量商品 code，整体替换语义）。归类要覆盖全部商品，不确定归属的放最接近的分类。",
+            seedNote: """
+            用户是商家，正在管理\(label)。帮其做商品分类：先 list_store_products 拿商品、\
+            list_category_schemes 看现有方案；建新方案用 create_category_scheme（会弹确认）；\
+            归类用 assign_category_products（每个分类调用一次、给该分类全量商品 code，整体替换语义）。
+
+            \(AIPrompts.classificationRules)
+            """,
             welcome: "我可以帮你打理店铺分类——比如说「按吃穿住行用给我的店分类」，我会生成方案并把商品归好类（执行前会请你确认）。",
             tools: [.listStoreProducts, .listCategorySchemes, .createCategoryScheme, .assignCategoryProducts],
             contextKey: "merchant-console"

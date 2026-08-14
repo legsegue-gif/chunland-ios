@@ -2,10 +2,13 @@ import Foundation
 
 // MARK: - AI 分类草稿
 //
-// 与聊天链路（AIOrchestrator agentic loop）刻意分离：这里不是对话，是编辑期的
-// **单次结构化调用** —— AI 产出草稿 → 预览编辑器（商家改名/挪动/剔除）→ 确认才落库。
-// 编辑器本身就是 HITL，不走 mutation 确认弹窗。AI 凭证仍全在端侧（系统 AI / 自配，
-// 与聊天同一配置源），不发往本项目服务端；落库走普通商家 REST（origin='ai' 溯源）。
+// 与聊天链路刻意分离：这里不是对话，是编辑期的**单次结构化调用** ——
+// AI 产出草稿 → 预览编辑器（商家改名/挪动/剔除）→ 确认才落库。
+// 编辑器本身就是 HITL，不走 mutation 确认弹窗。
+//
+// 走 `LLMProvider`（单次协议）而不是自建一套传输：与对话链路共用同一份
+// endpoint 解析、SSE 解析、错误分类，**顺带白拿重试与降级** ——
+// 单次调用一样会遇到限流和空响应，旧实现只有三个 error case 直接抛给用户。
 
 public struct AIClassifyDraft: Sendable {
     public struct Category: Sendable, Identifiable {
@@ -55,11 +58,6 @@ public enum AIClassifyService {
     /// 产出已做净化：剥代码围栏、过滤编造/重复 code、名称截 20 字。
     public static func generateDraft(idea: String, storeName: String? = nil,
                                      products: [MerchantProduct]) async throws -> AIClassifyDraft {
-        guard let cfg = resolveEndpoint() else {
-            throw UserDefaults.standard.bool(forKey: "ai_use_system")
-                ? ClassifyError.serviceUnavailable : ClassifyError.notConfigured
-        }
-
         let store = storeName.map { "「\($0)」" } ?? ""
         let productLines = products.isEmpty
             ? "（暂无商品）"
@@ -76,16 +74,14 @@ public enum AIClassifyService {
         当前商品清单（每行：code|名称|价格。仅作参考与归类对象，可能远少于店铺未来的商品）：
         \(productLines)
 
-        要求：
-        1. 分类框架以商家思路和店铺定位为准，覆盖本店经营的商品空间，不要被当前在售商品窄化；思路中已固定分类名单的，严格照用、不得增减改名
-        2. 方案名不超过 20 字；一级分类 2–8 个，每个分类名不超过 20 字
-        3. 支持两级：某个一级需要细分时，给细分分类加 "parent" 字段（值 = 一级分类名）；最多两级、两级合计不超过 30 个；思路要求了层级就按思路，思路没要求时只在明显必要处使用二级
-        4. 归类：每个商品按思路中的规则归入且仅归入一个分类（一级或二级均可；思路未给规则时归最贴切的）；只允许引用清单中出现的 code，绝不编造；清单为空时所有 productCodes 为空数组
-        5. 只输出 JSON，不要任何解释文字，格式：
+        \(AIPrompts.classificationRules)
+
+        输出：二级分类用 "parent" 字段指向一级分类名；清单为空时所有 productCodes 为空数组。
+        只输出 JSON，不要任何解释文字，格式：
         {"schemeName":"...","categories":[{"name":"吃","productCodes":[]},{"name":"零食","parent":"吃","productCodes":["..."]}]}
         """
 
-        let raw = try await completeOnce(cfg: cfg, prompt: prompt)
+        let raw = try await complete(prompt: prompt)
         return try parseDraft(raw, validCodes: Set(products.map(\.code)))
     }
 
@@ -95,11 +91,6 @@ public enum AIClassifyService {
     public static func assignProducts(schemeName: String, storeName: String? = nil,
                                       categories: [String], products: [MerchantProduct],
                                       note: String? = nil) async throws -> [String: [String]] {
-        guard let cfg = resolveEndpoint() else {
-            throw UserDefaults.standard.bool(forKey: "ai_use_system")
-                ? ClassifyError.serviceUnavailable : ClassifyError.notConfigured
-        }
-
         let store = storeName.map { "「\($0)」" } ?? ""
         let catList = categories.map { "「\($0)」" }.joined(separator: "、")
         let productLines = products.map { p in
@@ -109,11 +100,12 @@ public enum AIClassifyService {
         let extra = (note?.isEmpty == false) ? "\n商家补充的归类规则（优先遵守）：\(note!)\n" : ""
         let prompt = """
         你是电商商品分类专家。店铺\(store)的分类方案「\(schemeName)」有固定分类：\(catList)。
-        请把下面的商品逐一归入上述分类：
-        - 分类名严格照用，不得新增、改名；名称含「/」的是二级分类（父/子），输出时整体原样照用
-        - 同一商品在「父」与「父/子」都合适时，优先归入更具体的「父/子」
-        - 每个商品归入且仅归入一个最贴切的分类
-        - 确实无法归入任何分类的商品，不要出现在输出里（它将保持原状）
+        请把下面的商品逐一归入上述分类（**不要新建分类**）。
+
+        \(AIPrompts.classificationRules)
+
+        本路径补充：名称含「/」的是二级分类（父/子），输出时整体原样照用；
+        归不进任何分类的商品不要出现在输出里。
         \(extra)
         商品清单（每行：code|名称|价格；只允许引用清单中的 code，绝不编造）：
         \(productLines)
@@ -122,72 +114,43 @@ public enum AIClassifyService {
         {"categories":[{"name":"...","productCodes":["...","..."]}]}
         """
 
-        let raw = try await completeOnce(cfg: cfg, prompt: prompt)
+        let raw = try await complete(prompt: prompt)
         return try parseAssignments(raw, validCategories: Set(categories),
                                     validCodes: Set(products.map(\.code)))
     }
 
-    // MARK: - 配置解析（与 AIOrchestrator.restoreConfig 同一真相源：UserDefaults + Keychain + SystemAIProvider）
-
-    private static func resolveEndpoint() -> (base: String, model: String, key: String)? {
-        if UserDefaults.standard.bool(forKey: "ai_use_system") {
-            guard let ep = SystemAIProvider.endpoint else { return nil }
-            return (ep.absoluteString, SystemAIProvider.defaultModel, SystemAIProvider.internalKey)
-        }
-        guard let base = UserDefaults.standard.string(forKey: "ai_base_url"),
-              let model = UserDefaults.standard.string(forKey: "ai_model"),
-              let key = AuthManager.shared.aiApiKey, !key.isEmpty else { return nil }
-        return (base, model, key)
-    }
-
-    // MARK: - 单次补全（SSE 聚合）
+    // MARK: - 单次调用
     //
-    // 走 stream:true 后聚合 —— 与聊天链路同一协议路径，系统 AI / 自配端点都实测可用；
-    // 不押注端点实现了非流式。
+    // 经 ProviderRouter 拿 provider：自动带上重试与降级（首选来源限流/维护时
+    // 切到下一个），失败原因也统一成人话。旧实现在这里自己写了一套
+    // endpoint 解析 + SSE 解析 + 错误处理，与对话链路完全平行。
 
-    private static func completeOnce(cfg: (base: String, model: String, key: String),
-                                     prompt: String) async throws -> String {
-        guard let url = URL(string: cfg.base + "/chat/completions") else {
+    private static func complete(prompt: String) async throws -> String {
+        let runtime = AIRuntime.shared
+        await runtime.bootstrap()
+        guard runtime.isReady else {
+            throw ClassifyError.serviceUnavailable
+        }
+        guard let entry = await runtime.config.resolveEntry(binding: nil) else {
             throw ClassifyError.notConfigured
         }
-        struct Req: Encodable {
-            let model: String
-            let messages: [[String: String]]
-            let stream: Bool
-        }
-        var req = URLRequest(url: url, timeoutInterval: 120)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        req.setValue("Bearer \(cfg.key)", forHTTPHeaderField: "Authorization")
-        req.httpBody = try JSONEncoder().encode(
-            Req(model: cfg.model, messages: [["role": "user", "content": prompt]], stream: true)
-        )
-
-        struct Chunk: Decodable {
-            struct Choice: Decodable {
-                struct Delta: Decodable { let content: String? }
-                let delta: Delta
+        let factory = ProviderFactory(config: runtime.config)
+        do {
+            let provider = try await factory.make(entry: entry)
+            // 分类是一次性结构化输出，用满额度让它别把 JSON 写一半就截断
+            return try await provider.completeText(
+                messages: [.user(prompt)],
+                maxTokens: entry.maxOutputTokens
+            )
+        } catch let error as LLMError {
+            switch error {
+            case .notConfigured:                 throw ClassifyError.notConfigured
+            case .systemProviderUnavailable,
+                 .transientError, .rateLimited:  throw ClassifyError.serviceUnavailable
+            default:
+                throw ClassifyError.badResponse(error.errorDescription ?? "调用失败")
             }
-            let choices: [Choice]?
         }
-
-        let (stream, response) = try await URLSession.shared.bytes(for: req)
-        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
-            throw ClassifyError.badResponse("HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
-        }
-        let decoder = JSONDecoder()
-        var out = ""
-        for try await line in stream.lines {
-            guard line.hasPrefix("data: ") else { continue }
-            let payload = String(line.dropFirst(6))
-            if payload == "[DONE]" { break }
-            guard let data = payload.data(using: .utf8),
-                  let chunk = try? decoder.decode(Chunk.self, from: data),
-                  let delta = chunk.choices?.first?.delta.content else { continue }
-            out += delta
-        }
-        return out
     }
 
     // MARK: - 解析与净化

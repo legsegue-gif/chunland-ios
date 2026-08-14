@@ -29,7 +29,6 @@ final class TabRouter: ObservableObject {
 
 struct MainTabView: View {
     @EnvironmentObject var auth: AuthManager
-    @StateObject private var orchestrator = AIOrchestrator(authManager: AuthManager.shared)
     @StateObject private var tabRouter = TabRouter()
     // 各页面 ✨ 入口唤起 AI 的唯一接缝；根部统一呈现上下文对话面板。
     @StateObject private var aiCoordinator = AICoordinator()
@@ -62,26 +61,36 @@ struct MainTabView: View {
         }
         .minimizeTabBarOnScroll(tabRouter.selected == .feed)   // iOS 26+：仅「发现」tab 滚动时收起底部 tab
         .environmentObject(tabRouter)
+        .environment(AIRuntime.shared)
         .environmentObject(aiCoordinator)
         .environmentObject(loginCoordinator)
         // 各页面 ✨ 入口经 coordinator 在根部统一弹出上下文对话面板（覆盖所有 tab）。
         // 显式再注入 environment —— 确保 sheet 内 AIChatView / AskAIButton 拿到完整依赖。
         .sheet(item: $aiCoordinator.activeContext) { ctx in
-            AIChatSheet(context: ctx)
-                .environmentObject(orchestrator)
+            AgentChatSheet(context: ctx)
                 .environmentObject(auth)
                 .environmentObject(aiCoordinator)
                 .environmentObject(loginCoordinator)
+                .environment(AIRuntime.shared)
         }
         // 游客模式：账号类动作/受限 tab 触发登录，根部统一弹 AuthView（覆盖所有 tab）。
         .sheet(item: $loginCoordinator.pending) { req in
             AuthView(prompt: req.reason)
                 .environmentObject(auth)
+                // iPad（regular）上 sheet 是居中小卡片 + 大片遮罩，点遮罩/下滑即关。
+                // 而本 sheet 带着 pending 的待办动作（加购/下单/关注…），误关会把
+                // intent 一并丢掉且无任何提示 —— 用户点「加入购物车」，登录框一闪没了，
+                // 回头发现车里是空的。AuthView 右上角有 ✕（调 dismiss）作为明确出口，
+                // 故禁用手势/遮罩关闭。（iPad Pro 13" 实测）
+                .interactiveDismissDisabled()
         }
         .onAppear { alignTabToIdentity() }
         .onChange(of: auth.activeIdentity) { _, _ in
             // 切换身份 / 登录后落地到当前布局合法的 tab
             alignTabToIdentity()
+        }
+        .onChange(of: auth.currentUserId) { _, _ in
+            AIRuntime.shared.resetForAccountChange()
         }
         .onChange(of: auth.isLoggedIn) { _, loggedIn in
             // 登录成功 → 续做被拦动作并收起登录 sheet（无待办时 no-op）。
@@ -122,8 +131,7 @@ struct MainTabView: View {
         .tag(AppTab.home)
 
         NavigationStack {
-            AIView()
-                .environmentObject(orchestrator)
+            AgentAIView()
                 .environmentObject(auth)
         }
         .tabItem { Label("AI助手", systemImage: "sparkles") }
@@ -138,7 +146,6 @@ struct MainTabView: View {
 
         NavigationStack {
             ProfileView()
-                .environmentObject(orchestrator)
                 .environmentObject(auth)
         }
         .tabItem { Label("我的", systemImage: "person") }
@@ -163,8 +170,7 @@ struct MainTabView: View {
         .tag(AppTab.merchantOrders)
 
         NavigationStack {
-            AIView()
-                .environmentObject(orchestrator)
+            AgentAIView()
                 .environmentObject(auth)
         }
         .tabItem { Label("AI助手", systemImage: "sparkles") }
@@ -172,7 +178,6 @@ struct MainTabView: View {
 
         NavigationStack {
             ProfileView()
-                .environmentObject(orchestrator)
                 .environmentObject(auth)
         }
         .tabItem { Label("我的", systemImage: "person") }
@@ -204,8 +209,7 @@ struct MainTabView: View {
         .tag(AppTab.hall)
 
         NavigationStack {
-            AIView()
-                .environmentObject(orchestrator)
+            AgentAIView()
                 .environmentObject(auth)
         }
         .tabItem { Label("AI助手", systemImage: "sparkles") }
@@ -213,7 +217,6 @@ struct MainTabView: View {
 
         NavigationStack {
             ProfileView()
-                .environmentObject(orchestrator)
                 .environmentObject(auth)
         }
         .tabItem { Label("我的", systemImage: "person") }

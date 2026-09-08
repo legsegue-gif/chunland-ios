@@ -231,6 +231,16 @@ public struct MessageRepo: Sendable {
                 SQLValue(media?.id), SQLValue(offloadRef),
             ])
 
+        case .cards(let cards):
+            // JSON 进 text 列。**不进检索索引** —— 那是给用户看的渲染数据，
+            // 搜到一段 JSON 对用户没有意义。
+            let json = (try? JSONEncoder().encode(cards)).flatMap { String(data: $0, encoding: .utf8) }
+            try db.execute(sql, [
+                .text(partId), .text(messageId), SQLValue(idx),
+                .text(AISchema.PartKind.cards.rawValue), SQLValue(json),
+                .null, .null, .null, .null, .null, .null,
+            ])
+
         case .image(let ref):
             try db.execute(sql, [
                 .text(partId), .text(messageId), SQLValue(idx),
@@ -252,6 +262,14 @@ public struct MessageRepo: Sendable {
             guard let id = row.string("tool_use_id"), let name = row.string("tool_name") else { return nil }
             return .toolUse(id: id, name: name,
                             input: AgentToolInput.parse(row.string("tool_input") ?? "{}"))
+
+        case .cards:
+            // 解不出来就当没有卡片 —— 老库里的、或将来格式变了的，
+            // 都不该让整条消息读不出来（历史比一次渲染重要）
+            guard let json = row.string("text"), let data = json.data(using: .utf8),
+                  let cards = try? JSONDecoder().decode([AgentCard].self, from: data)
+            else { return nil }
+            return .cards(cards)
 
         case .toolResult:
             guard let id = row.string("tool_use_id"), let name = row.string("tool_name") else { return nil }

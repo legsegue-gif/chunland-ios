@@ -4,7 +4,7 @@ import Foundation
 //
 // 单个工具调用的固定处理顺序：
 //
-//   取消预检 → 循环检测 → 参数修复 → preflight（含身份守卫）→ 执行 → 记录
+//   取消预检 → 循环检测 → 参数修复 → preflight（身份守卫 + 必填校验 + provenance）→ 执行 → 记录
 //
 // **任何一条路径都不能跳过最后的记录步骤** —— 漏记会让循环检测器看不到打转，
 // 于是熔断永远不触发，放开的轮次上限就成了隐患而不是能力。
@@ -65,6 +65,9 @@ public struct AgentToolPipeline: Sendable {
             // 被数两遍，「连续 N 次」的阈值语义就变成了 N/2 轮。
             guard await executor.isAvailable(entry.name) else { continue }
             let repaired = repairInput(entry, tools: tools)
+            // provenance 不过的同样不必解析，且同样**只判定不记账**。
+            // 不跳过的话用户会先看到一个确认弹窗、点了确认才被告知「这个 id 没见过」。
+            guard await executor.provenanceRejection(entry.name, input: repaired) == nil else { continue }
             do {
                 let result = try await executor.prepare(entry.name, input: repaired)
                 prepared[index] = result
@@ -228,6 +231,14 @@ public struct AgentToolPipeline: Sendable {
             return finish(entry, title: title, text: rejection.modelMessage, isError: true, cancelled: false)
         }
 
+        // provenance 守卫：本会话没见过的 id 一律拒绝。
+        // 放在 preflight 之后 —— 必填都没齐时先报缺参，两道同时报会让模型收到两种说法。
+        if let rejection = await executor.provenanceRejection(entry.name, input: repaired) {
+            detector.record(toolName: entry.name, input: repaired, result: nil)
+            logger.warn("provenance 拒绝", metadata: ["tool": entry.name])
+            return finish(entry, title: title, text: rejection, isError: true, cancelled: false)
+        }
+
         do {
             let text: String
             if let prepared {
@@ -249,14 +260,18 @@ public struct AgentToolPipeline: Sendable {
             }
 
             detector.record(toolName: entry.name, input: repaired, result: text)
-            let body = warning.map { "\(text)\n\n<系统提醒>\($0)</系统提醒>" } ?? text
-            return finish(entry, title: title, text: body, isError: false, cancelled: false)
+            // 服务端工具体的返回已消毒已围栏 —— 端上原样透传，绝不再过一遍
+            let processing: ResultProcessing =
+                await executor.isRemote(entry.name) ? .alreadyProcessed : .fenceData
+            return finish(entry, title: title, text: text, isError: false, cancelled: false,
+                          processing: processing, warning: warning)
 
         } catch {
             let message = "执行「\(entry.name)」时出错：\(error.localizedDescription)"
             detector.record(toolName: entry.name, input: repaired, result: message)
             logger.error("工具执行失败", metadata: ["tool": entry.name, "error": "\(error)"])
-            return finish(entry, title: title, text: message, isError: true, cancelled: false)
+            return finish(entry, title: title, text: message, isError: true, cancelled: false,
+                          processing: .fenceData)
         }
     }
 
@@ -278,15 +293,50 @@ public struct AgentToolPipeline: Sendable {
         return outcome.input
     }
 
+    /// 所有工具结果的**唯一出口** —— 消毒、围栏、追加系统提醒三步的顺序在这里由构造保证。
+    ///
+    /// 顺序不能动：先消毒（剥掉正文里伪造的标记），再围栏，最后才追加我们自己的
+    /// 系统提醒。反过来做等于把自己的提醒也消毒掉。
+    ///
+    /// - Parameters:
+    ///   - processing: 见 `ResultProcessing`。
+    ///   - warning: 循环检测的非阻断警告，附在结果之后（围栏之外）。
+    /// 工具结果文本要怎么处理。
+    ///
+    /// 三态而不是一个 Bool：R5 之后结果有三种来源，处理方式互不相同，
+    /// 用布尔表达会出现「消毒了但没围栏」和「服务端已围栏又被端上消毒」两种错配。
+    private enum ResultProcessing {
+        /// 端上工具产出的数据：消毒 + 包数据围栏。
+        case fenceData
+        /// 管道自己的控制文案（阻断说明、前置条件引导）：只消毒不围栏 ——
+        /// 它们本身就是要模型照做的指令，包进「这是数据」的围栏等于自我否定。
+        case controlText
+        /// 服务端工具体已消毒且已围栏：**原样透传**。
+        /// 再过一次消毒会把服务端加的围栏标记一并中和掉，围栏就白做了。
+        case alreadyProcessed
+    }
+
     private func finish(_ entry: AgentTurnResult.ToolEntry,
                         title: String?,
                         text: String,
                         isError: Bool,
-                        cancelled: Bool) -> ToolExecOutcome {
-        ToolExecOutcome(
+                        cancelled: Bool,
+                        processing: ResultProcessing = .controlText,
+                        warning: String? = nil) -> ToolExecOutcome {
+        var body: String
+        switch processing {
+        case .fenceData:
+            body = AIFence.fence(AIFence.sanitize(text))
+        case .controlText:
+            body = AIFence.sanitize(text)
+        case .alreadyProcessed:
+            body = text
+        }
+        if let warning { body += "\n\n" + AIFence.systemNote(warning) }
+        return ToolExecOutcome(
             toolId: entry.id,
             toolName: entry.name,
-            part: .toolResult(id: entry.id, name: entry.name, text: text, isError: isError),
+            part: .toolResult(id: entry.id, name: entry.name, text: body, isError: isError),
             cancelled: cancelled,
             title: title,
             isError: isError

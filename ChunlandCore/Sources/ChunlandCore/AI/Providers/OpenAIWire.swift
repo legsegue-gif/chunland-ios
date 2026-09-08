@@ -163,6 +163,11 @@ enum OpenAIWire {
             case .text(let t):
                 parts.append(.text(t))
 
+            case .cards:
+                // 卡片是给用户看的，**绝不上 wire** —— 它不参与模型推理，
+                // 上了只是白占上下文，而且模型会开始转述卡片里的数字。
+                continue
+
             case .image(let ref):
                 if let loadImage, let data = loadImage(ref) {
                     parts.append(.imageURL("data:\(ref.mime);base64,\(data.base64EncodedString())"))

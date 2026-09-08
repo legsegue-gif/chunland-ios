@@ -81,6 +81,9 @@ public enum AIDebugFileLog {
                                             "name": name, "isError": isError, "text": text]
                 if let offloadRef { entry["offloadRef"] = offloadRef }
                 parts.append(entry)
+            case .cards(let cards):
+                parts.append(["kind": "cards", "count": cards.count])
+
             case .image(let ref):
                 parts.append(["kind": "image", "sha256": ref.sha256, "bytes": ref.bytes])
             }

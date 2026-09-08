@@ -35,7 +35,7 @@ targets:
       base:
         # 版本号单一真相源：在此改，xcodegen generate 后生效（Info.plist 用 $(MARKETING_VERSION)/$(CURRENT_PROJECT_VERSION) 引用）。
         # CFBundleShortVersionString（对外版本，App Store 展示）/ CFBundleVersion（构建号，每次上传须递增）。
-        MARKETING_VERSION: "2.1.2"
+        MARKETING_VERSION: "2.2.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "6.0"
         INFOPLIST_FILE: Chunland/Sources/Resources/Info.plist
@@ -55,6 +55,12 @@ targets:
       - path: Chunland/Tests
     dependencies:
       - target: Chunland
+    settings:
+      base:
+        # 测试 bundle 也要签名，签名要 Info.plist。app target 的 INFOPLIST_FILE 不会被
+        # 继承到这里，让 Xcode 自动生成即可（此前目录里只有占位冒烟测试、从未真跑过，
+        # 所以这个缺失一直没暴露）。
+        GENERATE_INFOPLIST_FILE: YES
 
 # 显式声明共享 scheme（CI 环境 clone 后需要它才能编译）。
 # XcodeGen 把这里声明的 scheme 写入 Chunland.xcodeproj/xcshareddata/xcschemes/。

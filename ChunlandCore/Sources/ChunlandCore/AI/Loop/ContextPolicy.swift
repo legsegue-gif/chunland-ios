@@ -136,6 +136,10 @@ public enum TokenEstimator {
                 total += estimate(name) + estimate(input.jsonString())
             case .toolResult(_, let name, let text, _, _, _):
                 total += estimate(name) + estimate(text)
+            case .cards:
+                // 不发送 → 不占上下文
+                break
+
             case .image:
                 // 图片的实际消耗随分辨率变化很大，取一个中等值。
                 // 宁可高估 —— 低估会让上下文悄悄溢出，那是硬失败。

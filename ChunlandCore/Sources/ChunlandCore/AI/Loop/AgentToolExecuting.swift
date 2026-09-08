@@ -60,6 +60,36 @@ public protocol AgentToolExecuting: Sendable {
 
     /// 只读工具的执行。
     func execute(_ name: String, input: AgentToolInput) async throws -> String
+
+    /// provenance 守卫：参数里的 id 本会话是否真的见过。
+    ///
+    /// nil = 放行；非 nil = 拒绝话术（必须写清先调哪个只读工具、且禁止原样重试）。
+    /// 与身份守卫并列，都是「参数到了、执行之前」这一档的拦截。
+    func provenanceRejection(_ name: String, input: AgentToolInput) async -> String?
+
+    /// 工具体是否在服务端（R5）。
+    ///
+    /// true 时 `execute` 的返回值**已消毒且已围栏**，管道必须原样透传 ——
+    /// 再过一次消毒会把服务端加的围栏标记一并中和掉。
+    func isRemote(_ name: String) async -> Bool
+
+    /// 取走并清空本轮攒下的结构化卡片（R3）。
+    ///
+    /// 卡片由服务端随工具结果一起给出，**不经模型转述** —— 模型只报 id，
+    /// 卡片上的每个字段都来自那一次查询的真实行。
+    /// 循环在一批工具执行完之后取走，挂到这一轮的 assistant 消息上。
+    func drainCards() async -> [AgentCard]
+}
+
+public extension AgentToolExecuting {
+    /// 默认不约束 —— 只有真正持有会话 provenance 的实现才需要覆盖它。
+    func provenanceRejection(_ name: String, input: AgentToolInput) async -> String? { nil }
+
+    /// 默认全在端上 —— 测试假件与尚未迁移的实现不必关心这件事。
+    func isRemote(_ name: String) async -> Bool { false }
+
+    /// 默认不产卡片。
+    func drainCards() async -> [AgentCard] { [] }
 }
 
 /// 确认接缝 —— 由 UI 层实现。

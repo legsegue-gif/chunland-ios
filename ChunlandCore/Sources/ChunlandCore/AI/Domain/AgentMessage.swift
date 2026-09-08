@@ -55,6 +55,13 @@ public enum AgentContentPart: Sendable, Equatable {
 
     /// 用户附带的图片。
     case image(MediaRef)
+
+    /// 结构化卡片（R3）—— **给用户看的那一份，不喂给模型**。
+    ///
+    /// 模型只报 id，价格库存由服务端从真实行填充。模型转述数字迟早会转错一次，
+    /// 卡片上的每个字段都来自那一次查询，错不了。
+    /// 与同一次工具调用的 `toolResult` 同源，两者不会各说各话。
+    case cards([AgentCard])
 }
 
 /// 工具调用参数。
@@ -62,6 +69,33 @@ public enum AgentContentPart: Sendable, Equatable {
 /// 用具体类型而不是 `[String: Any]`：`Any` 不是 `Sendable`，会让整条链路上的
 /// 消息、流事件、缓存全部被迫 `@unchecked`。JSON 的取值空间本来就是封闭的，
 /// 显式建模后并发检查、相等比较、编解码全部免费获得。
+/// 一张结构化卡片。
+///
+/// 目前只有商品一种。做成带 `kind` 的结构而不是直接 `AgentProductCard`，
+/// 是为了将来加订单卡/店铺卡时**老客户端能静默跳过不认识的 kind**，
+/// 而不是整条消息解码失败。
+public struct AgentCard: Sendable, Equatable, Codable {
+    public let kind: String
+    public let code: String?
+    public let name: String?
+    public let price: Double?
+    public let originalPrice: Double?
+    public let inStock: Bool?
+    public let thumbnail: String?
+
+    public init(kind: String, code: String? = nil, name: String? = nil,
+                price: Double? = nil, originalPrice: Double? = nil,
+                inStock: Bool? = nil, thumbnail: String? = nil) {
+        self.kind = kind
+        self.code = code
+        self.name = name
+        self.price = price
+        self.originalPrice = originalPrice
+        self.inStock = inStock
+        self.thumbnail = thumbnail
+    }
+}
+
 public enum AgentJSONValue: Sendable, Equatable, Codable {
     case string(String)
     case number(Double)

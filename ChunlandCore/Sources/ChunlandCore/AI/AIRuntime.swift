@@ -38,6 +38,9 @@ public final class AIRuntime {
                 AgentToolRegistry(
                     scope: context.scope,
                     suggested: context.tools,
+                    // 页面上下文里的 id 天然合法 —— 不预置，商品详情页 ✨ 一进来
+                    // 说「加购」就会被 provenance 守卫自己挡住
+                    seedProvenance: context.seedProvenance,
                     // 用闭包而不是快照：身份可能在会话存续期间被切换，
                     // 工具可用集必须跟着变
                     activeIdentity: { AuthManager.shared.activeIdentity }

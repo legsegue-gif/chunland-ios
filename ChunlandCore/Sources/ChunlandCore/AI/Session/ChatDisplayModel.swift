@@ -101,6 +101,11 @@ public final class ChatDisplayMessage: Identifiable {
     public var blocks: [ChatBlock]
     /// 用户附带的图片。
     public var media: [MediaRef]
+    /// 结构化卡片（R3）—— 商品等实体的权威呈现。
+    ///
+    /// **模型只报 id，这里的每个字段都来自服务端那一次查询的真实行。**
+    /// 模型转述数字迟早会转错一次，卡片不会。
+    public var cards: [AgentCard] = []
     /// 出错时的说明（渲染在气泡下方）。
     public var error: String?
     /// 这条消息是否还在流式生成。
@@ -147,10 +152,32 @@ public final class ChatDisplayMessage: Identifiable {
         blocks.append(.tool(ChatToolBlock(id: id, name: name, title: title)))
     }
 
-    func finishTool(id: String, isError: Bool, preview: String?) {
+    /// 给工具块补终态。`resultText` 是**原始工具结果**（带围栏），摘要在这里成型 ——
+    /// 流式与重开会话两条路径都走这里，摘要口径因此只有一份。
+    func finishTool(id: String, isError: Bool, resultText: String?) {
         guard let block = findTool(id) else { return }
         block.status = isError ? .failed : .success
-        block.resultPreview = preview
+        block.resultPreview = ChatDisplayMessage.toolPreview(resultText)
+    }
+
+    /// 结果摘要的码点上限。双端同值 —— 同一次调用展开看到的东西不该因端而异。
+    ///
+    /// 取值比工具结果上限（`AIFence.maxResultChars` = 6000）小一个量级：
+    /// 这是「扫一眼确认 AI 没瞎编」的量，不是全文阅读器。
+    static let toolPreviewMaxChars = 400
+
+    static let toolPreviewEllipsis = "…"
+
+    /// 工具结果 → 折叠态可展开的摘要。
+    ///
+    /// 先剥围栏（界面上不该出现划给模型看的边界），再按**码点**截断
+    /// （与 `AIFence.fence` 同口径，永不切断一个字符）。
+    static func toolPreview(_ resultText: String?) -> String? {
+        let body = AIFence.unfence(resultText ?? "")
+        if body.isEmpty { return nil }
+        if body.unicodeScalars.count <= toolPreviewMaxChars { return body }
+        return String(String.UnicodeScalarView(body.unicodeScalars.prefix(toolPreviewMaxChars)))
+            + toolPreviewEllipsis
     }
 
     /// 收尾时把仍在 running 的工具块强制关掉。

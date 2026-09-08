@@ -31,6 +31,9 @@ public struct AIToolScope: Sendable, Equatable {
 //   - scope      : 工具执行的结构化作用域（给代码，不是给模型），见 AIToolScope
 //   - contextKey : 会话续聊的稳定 key（如 "product:123456"）。同 key 的近期会话被复用，
 //                  解决「问一半收起再开就没了」+ 抽屉堆满一次性死会话；nil = 每次新开
+//   - seedProvenance : 页面上下文里天然合法的 id。用户就站在这个商品/订单页上，
+//                  模型不必先查一遍才能对它下手 —— 不预置的话，商品详情页 ✨ 说
+//                  「加购」会被 provenance 守卫自己挡住
 public struct AIContext: Identifiable, Sendable, Equatable {
     public let id: UUID
     public let title: String
@@ -39,6 +42,7 @@ public struct AIContext: Identifiable, Sendable, Equatable {
     public let tools: Set<AIToolName>?
     public let scope: AIToolScope
     public let contextKey: String?
+    public let seedProvenance: [AIProvenanceKind: [String]]
 
     public init(id: UUID = UUID(),
                 title: String,
@@ -46,7 +50,8 @@ public struct AIContext: Identifiable, Sendable, Equatable {
                 welcome: String? = nil,
                 tools: Set<AIToolName>? = nil,
                 scope: AIToolScope = .global,
-                contextKey: String? = nil) {
+                contextKey: String? = nil,
+                seedProvenance: [AIProvenanceKind: [String]] = [:]) {
         self.id = id
         self.title = title
         self.seedNote = seedNote
@@ -54,6 +59,7 @@ public struct AIContext: Identifiable, Sendable, Equatable {
         self.tools = tools
         self.scope = scope
         self.contextKey = contextKey
+        self.seedProvenance = seedProvenance
     }
 }
 
@@ -70,7 +76,9 @@ public extension AIContext {
             seedNote: "用户正在浏览商品「\(name)」（商品代码 \(code)）。涉及该商品的库存/价格/详情请调用 get_product_detail 用代码 \(code) 获取最新数据。",
             welcome: "关于「\(name)」，有什么可以帮你？比如它值不值得买、加入购物车。",
             tools: [.getProductDetail, .addToCart, .getCart, .placeOrder],
-            contextKey: "product:\(code)"
+            contextKey: "product:\(code)",
+            // 用户就在这个商品页上 —— 直接说「加购」不该被 provenance 挡
+            seedProvenance: [.product: [code]]
         )
     }
 
@@ -93,7 +101,8 @@ public extension AIContext {
             seedNote: "用户正在查看\(label)（内部 id \(id)）。涉及该订单状态/进度请用 get_order_detail 传 order_id=\(id) 获取最新数据，不要复用历史结果。",
             welcome: "关于这笔订单，有什么可以帮你？比如它到哪了、怎么退、现在还能做什么。",
             tools: [.getOrderDetail, .listMyOrders],
-            contextKey: "order:\(id)"
+            contextKey: "order:\(id)",
+            seedProvenance: [.order: ["\(id)"]]
         )
     }
 

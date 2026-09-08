@@ -16,7 +16,13 @@ public enum AgentLoopEvent: Sendable {
     case thinkingDelta(String)
     /// 工具开始执行。`title` 是模型自述的「在做什么」。
     case toolStarted(id: String, name: String, title: String?)
-    case toolFinished(id: String, name: String, isError: Bool)
+    /// 工具执行完毕。`resultText` 是原始结果（带围栏），UI 拿它成摘要 ——
+    /// 不带的话流式期间那个块就只有状态没有内容，展不开。
+    case toolFinished(id: String, name: String, isError: Bool, resultText: String?)
+    /// 结构化卡片（R3）—— **给用户看的那一份，不喂给模型**。
+    /// 与 `.cards` 历史 part 是同一批数据：这个事件负责流式期间的展示，
+    /// 历史 part 负责重开会话后仍在。
+    case cards([AgentCard])
     /// 发生了模型降级，应告知用户。
     case fallback(FallbackRecord)
     /// 上下文被压缩了。
@@ -298,7 +304,17 @@ public actor AgentLoop {
             let outcomes = await pipeline.executeBatch(result.toolEntries, tools: tools)
             for outcome in outcomes {
                 emit(.toolStarted(id: outcome.toolId, name: outcome.toolName, title: outcome.title))
-                emit(.toolFinished(id: outcome.toolId, name: outcome.toolName, isError: outcome.isError))
+                var resultText: String?
+                if case .toolResult(_, _, let text, _, _, _) = outcome.part { resultText = text }
+                emit(.toolFinished(id: outcome.toolId, name: outcome.toolName,
+                                   isError: outcome.isError, resultText: resultText))
+            }
+            // 卡片挂到刚才那条 assistant 上 —— 它是「这一轮助手做了什么」的载体。
+            // wire 层会跳过 .cards，所以不占上下文、模型也无从转述卡片里的数字。
+            let cards = await executor.drainCards()
+            if !cards.isEmpty, let last = history.indices.last {
+                history[last].parts.append(.cards(cards))
+                emit(.cards(cards))       // 流式期间也要立刻显示，不能等重开会话
             }
             history.append(.toolResults(outcomes.map(\.part)))
 

@@ -297,6 +297,10 @@ public enum AISchema {
         case toolUse = "tool_use"
         case toolResult = "tool_result"
         case image
+        /// 结构化卡片（R3）。JSON 存在 `text` 列 —— **不新增列、不升 schema 版本**：
+        /// `kind` 本来就是 TEXT，新增取值不改 DDL。检索索引只收 `.text`，
+        /// 所以卡片 JSON 不会污染搜索。
+        case cards
     }
 
     /// `memories.scope` 的取值（预留）。

@@ -76,7 +76,7 @@ public final class AIChatSession {
                 sessionId = existing.id
                 let history = try await messages_.load(sessionId: existing.id)
                 await loop.setHistory(history)
-                messages = history.compactMap(Self.display(from:))
+                messages = Self.displays(from: history)
                 logger.info("续聊", metadata: ["key": key, "messages": "\(history.count)"])
                 return
             }
@@ -105,7 +105,7 @@ public final class AIChatSession {
             let history = try await messages_.load(sessionId: targetId)
             sessionId = targetId
             await loop.setHistory(history)
-            messages = history.compactMap(Self.display(from:))
+            messages = Self.displays(from: history)
             logger.info("装载历史会话", metadata: ["messages": "\(history.count)"])
         } catch {
             logger.error("装载历史会话失败", metadata: ["error": "\(error)"])
@@ -228,8 +228,11 @@ public final class AIChatSession {
         case .toolStarted(let id, let name, let title):
             display.addTool(id: id, name: name, title: title)
 
-        case .toolFinished(let id, _, let isError):
-            display.finishTool(id: id, isError: isError, preview: nil)
+        case .cards(let cards):
+            display.cards.append(contentsOf: cards)
+
+        case .toolFinished(let id, _, let isError, let resultText):
+            display.finishTool(id: id, isError: isError, resultText: resultText)
 
         case .fallback(let record):
             // 降级必须让用户看见 —— 否则「今天回答风格怎么变了」无从解释
@@ -315,7 +318,7 @@ public final class AIChatSession {
     /// 历史消息 → 展示模型。
     ///
     /// 工具调用与结果在 domain 里是两条消息，在 UI 上要合成一个块 ——
-    /// 所以先建块（assistant 的 toolUse），再由后续的 toolResult 补状态。
+    /// 这里只建块（assistant 的 toolUse），补状态由 `mergeToolResults` 单独一趟做。
     nonisolated static func display(from message: AgentMessage) -> ChatDisplayMessage? {
         MainActor.assumeIsolated {
             let role: ChatDisplayMessage.Role = message.role == .user ? .user : .assistant
@@ -324,15 +327,20 @@ public final class AIChatSession {
             for part in message.parts {
                 switch part {
                 case .text(let text):
-                    // 空响应提醒是内部注入的，不给用户看
-                    guard !text.hasPrefix("<系统提醒>") else { continue }
+                    // 空响应提醒是内部注入的，不给用户看。
+                    // 判据必须是 AIFence 的标记常量 —— 正文里的标记副本已在消毒时中和，
+                    // 所以这里前缀命中即可断定是我们自己注入的，外部文本伪造不出来。
+                    guard !text.hasPrefix(AIFence.systemOpen) else { continue }
                     display.appendText(text)
                 case .toolUse(let id, let name, let input):
                     display.addTool(id: id, name: name,
                                     title: input.string(AgentToolDefinition.toolTitleKey))
                 case .toolResult:
-                    // 结果由 mergeToolResults 补到对应的块上
+                    // 结果不在这条消息里配对 —— 由 mergeToolResults 跨消息补到对应的块上
                     continue
+                case .cards(let cards):
+                    display.cards.append(contentsOf: cards)
+
                 case .image(let ref):
                     display.media.append(ref)
                 }
@@ -342,6 +350,39 @@ public final class AIChatSession {
             }
             return display.isEmpty ? nil : display
         }
+    }
+
+    /// 把工具结果补回对应的工具块上。**重建历史时必须走这一趟。**
+    ///
+    /// 为什么非得单独一趟：`toolUse` 和它的 `toolResult` **不在同一条消息里**
+    /// （结果是紧随其后那条 role=tool 的消息），而 `display(from:)` 一次只看一条消息，
+    /// 天然拼不起来。
+    ///
+    /// 漏了这趟的后果是静默的：`addTool` 建块默认 `.running`，此后无人补状态 ——
+    /// 重开会话后每个历史工具调用都停在「执行中」转圈，且展不开结果。
+    /// 编译、单测、parity 全都抓不到，只有真的重开一次会话才看得见。
+    @MainActor
+    static func mergeToolResults(_ displays: [ChatDisplayMessage], history: [AgentMessage]) {
+        for message in history {
+            for part in message.parts {
+                guard case .toolResult(let id, _, let text, let isError, _, _) = part else { continue }
+                // finishTool 找不到块就是空操作，所以挨条试是安全的
+                for display in displays {
+                    display.finishTool(id: id, isError: isError, resultText: text)
+                }
+            }
+        }
+    }
+
+    /// 历史 → 展示模型。建块与补结果是两趟，缺一不可（见 `mergeToolResults`）。
+    @MainActor
+    static func displays(from history: [AgentMessage]) -> [ChatDisplayMessage] {
+        let displays = history.compactMap(Self.display(from:))
+        mergeToolResults(displays, history: history)
+        // 历史里有 toolUse 却没有对应结果 = 上次被中途杀掉。
+        // 不收这个尾就又是一个永远转不完的圈 —— 与流式收尾同一张安全网。
+        for display in displays { display.closeDanglingTools() }
+        return displays
     }
 }
 

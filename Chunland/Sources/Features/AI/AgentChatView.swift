@@ -179,6 +179,12 @@ struct AgentChatView: View {
                 }
             }
 
+            // 结构化卡片（R3）：价格库存来自服务端那一次查询的真实行，
+            // 不是模型转述的。放在文本之后 —— 模型先说结论，卡片给权威数字。
+            if !message.cards.isEmpty {
+                AgentCardStrip(cards: message.cards)
+            }
+
             if message.isStreaming && message.blocks.isEmpty {
                 thinkingIndicator
             }
